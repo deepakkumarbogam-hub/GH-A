@@ -1,0 +1,145 @@
+# ============================================================
+# LAB: GitHub Actions — Jobs, needs, parallel jobs, artifacts, secrets
+# Save this as: .github/workflows/ci-lab.yml in any test repo
+# ============================================================
+
+name: CI Lab - Jobs and Artifacts Demo
+
+# --- TRIGGERS ---
+# Runs on every push to main, and manually via "Run workflow" button
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:      # lets you trigger it manually from the Actions tab
+
+jobs:
+
+  # ------------------------------------------------------------
+  # JOB 1 & 2 run IN PARALLEL because neither has "needs"
+  # ------------------------------------------------------------
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Fake lint step
+        run: |
+          echo "Running lint checks..."
+          echo "No issues found" > lint-report.txt
+
+      - name: Upload lint report as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: lint-report.txt
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Fake test step
+        run: |
+          echo "Running tests..."
+          echo "5 passed, 0 failed" > test-report.txt
+
+      - name: Upload test report as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: test-report.txt
+
+  # ------------------------------------------------------------
+  # JOB 3: waits for BOTH lint and test to finish -> "fan-in"
+  # ------------------------------------------------------------
+  build:
+    needs: [lint, test]      # <-- this is the dependency line
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download lint report
+        uses: actions/download-artifact@v4
+        with:
+          name: lint-report
+
+      - name: Download test report
+        uses: actions/download-artifact@v4
+        with:
+          name: test-report
+
+      - name: Show downloaded reports (proves data passed between jobs)
+        run: |
+          echo "--- Lint report ---"
+          cat lint-report.txt
+          echo "--- Test report ---"
+          cat test-report.txt
+
+      - name: Fake build step
+        run: |
+          mkdir -p dist
+          echo "app build artifact v1.0.0" > dist/app.jar
+
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: dist/
+
+  # ------------------------------------------------------------
+  # JOB 4: sequential dependency on build only, demonstrates
+  # secrets usage (safe placeholder — replace with real secret)
+  # ------------------------------------------------------------
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: build-output
+          path: dist/
+
+      - name: Simulate deploy using a secret
+        env:
+          # Create this in: Repo Settings -> Secrets and variables -> Actions
+          # For this lab, add a secret named DEMO_TOKEN with any dummy value
+          DEMO_TOKEN: ${{ secrets.DEMO_TOKEN }}
+        run: |
+          echo "Deploying dist/app.jar ..."
+          if [ -z "$DEMO_TOKEN" ]; then
+            echo "WARNING: DEMO_TOKEN secret not set, using placeholder"
+          else
+            echo "Authenticated using secret (value is masked in logs)"
+          fi
+          echo "Deploy complete."
+
+  # ------------------------------------------------------------
+  # JOB 5 (BONUS): pushing a "release" artifact to JFrog Artifactory
+  # This is commented out/illustrative since it needs a real
+  # Artifactory instance + credentials. Shows the real-world pattern.
+  # ------------------------------------------------------------
+  # publish-to-artifactory:
+  #   needs: deploy
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #
+  #     - name: Download build artifact
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: build-output
+  #         path: dist/
+  #
+  #     - name: Setup JFrog CLI
+  #       uses: jfrog/setup-jfrog-cli@v4
+  #       env:
+  #         JF_URL: ${{ secrets.JFROG_URL }}
+  #         JF_ACCESS_TOKEN: ${{ secrets.JFROG_ACCESS_TOKEN }}
+  #
+  #     - name: Upload jar to Artifactory local repo
+  #       run: |
+  #         jf rt upload "dist/app.jar" "libs-release-local/com/deepak/app/1.0.0/"
